@@ -136,6 +136,9 @@ R"(
 // INDEX_TYPE - typename for the type of integer data read by the kernel,  usually unsigned int
 // VALUE_TYPE - typename for the type of floating point data, usually double
 // SUBWAVE_SIZE - the length of a "sub-wave", a power of 2, i.e. 1,2,4,...,WAVE_SIZE, assigned to process a single matrix row
+//
+// 修改说明：新增 majorB 和 majorC 参数，用于指定密集矩阵 B 和 C 的存储顺序（ROW_MAJOR=0, COL_MAJOR=1）
+// 内核根据 major 标志动态计算基指针和步长，从而正确支持列主序布局。
 kernel
 __attribute__( ( reqd_work_group_size( WG_SIZE, 1, 1 ) ) )
 void csrmv_batched( const INDEX_TYPE num_rows,
@@ -153,16 +156,33 @@ void csrmv_batched( const INDEX_TYPE num_rows,
             const INDEX_TYPE num_rows_C,
             const INDEX_TYPE num_cols_C,
             const INDEX_TYPE ldC,
-            const SIZE_TYPE off_C )
+            const SIZE_TYPE off_C,
+            const int majorB,      // 新增：B 矩阵存储顺序
+            const int majorC )     // 新增：C 矩阵存储顺序
 {
     local VALUE_TYPE sdata[ WG_SIZE + SUBWAVE_SIZE / 2 ];
 
-    //  The current implementation of csrmm is implemented as a batched csrmv
-    //  The loop iterates on the number of columns in the output matrix, and we increment
-    //  the global pointers to the dense B and C matrices a column for each iteration.
+    // ----- 预计算 B 矩阵的访问参数 -----
+    const SIZE_TYPE x_ld    = (majorB == ROW_MAJOR) ? ldB : 1;
+    const SIZE_TYPE x_step  = (majorB == ROW_MAJOR) ? 1 : ldB;   // 每增加一列，指针前进的步长
+    global const VALUE_TYPE* const x_base = denseB + off_B;
+
+    // ----- 预计算 C 矩阵的访问参数 -----
+    const SIZE_TYPE y_ld    = (majorC == ROW_MAJOR) ? ldC : 1;
+    const SIZE_TYPE y_step  = (majorC == ROW_MAJOR) ? 1 : ldC;
+    global VALUE_TYPE* const y_base = denseC + off_C;
+
     for( SIZE_TYPE curr_col = 0; curr_col < num_cols_C; ++curr_col )
     {
-        csrmv( num_rows, alpha, off_alpha, row_offset, col, val, denseB + curr_col, ldB, off_B, beta, off_beta, denseC + curr_col, ldC, off_C, sdata );
+        global const VALUE_TYPE* x_ptr = x_base + curr_col * x_step;
+        global       VALUE_TYPE* y_ptr = y_base + curr_col * y_step;
+
+        csrmv( num_rows, alpha, off_alpha,
+               row_offset, col, val,
+               x_ptr, x_ld, 0,
+               beta, off_beta,
+               y_ptr, y_ld, 0,
+               sdata );
     }
 }
 )"
