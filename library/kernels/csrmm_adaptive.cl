@@ -33,6 +33,10 @@ R"(
   #define FPTYPE float
 #endif
 
+// ========== ADDED: 矩阵存储顺序常量 ==========
+#define ROW_MAJOR 0
+#define COL_MAJOR 1
+
 #if defined(cl_khr_int64_base_atomics) && defined(cl_khr_int64_extended_atomics)
   #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
   #pragma OPENCL EXTENSION cl_khr_int64_extended_atomics : enable
@@ -130,6 +134,7 @@ void atomic_add_float( global FPTYPE *ptr, FPTYPE temp )
 )"
 
 R"(
+// ========== MODIFIED: csrmv_batched 增加 majorB/majorC 参数 ==========
 void
 csrmv_batched( global const FPTYPE * restrict sparseVals,
         global const int * restrict sparseCols,
@@ -141,12 +146,18 @@ csrmv_batched( global const FPTYPE * restrict sparseVals,
         const ulong ldC,
         global FPTYPE * pAlpha,
         global FPTYPE * pBeta,
-        local FPTYPE* partialSums )
+        local FPTYPE* partialSums,
+        const int majorB,
+        const int majorC )
 {
     size_t groupID = get_group_id( 0 );
     size_t localID = get_local_id( 0 );
     const FPTYPE alpha = *pAlpha;
     const FPTYPE beta = *pBeta;
+
+    // 计算 B 和 C 矩阵的步长
+    const ulong x_ld = (majorB == ROW_MAJOR) ? ldB : 1;
+    const ulong y_ld = (majorC == ROW_MAJOR) ? ldC : 1;
 
     // The row blocks buffer holds a packed set of information used to inform each
     // workgroup about how to do its work:
@@ -204,7 +215,7 @@ csrmv_batched( global const FPTYPE * restrict sparseVals,
         // In a nutshell, the idea is to use all of the threads to stream the matrix
         // values into the local memory in a fast, coalesced manner. After that, the
         // per-row reductions are done out of the local memory, which is designed
-        // to handle non-coalsced accesses.
+        // to handle non-coalesced accesses.
 
         // The best method for reducing the local memory values depends on the number
         // of rows. The SC'14 paper discusses a "CSR-Scalar" style reduction where
@@ -233,7 +244,8 @@ csrmv_batched( global const FPTYPE * restrict sparseVals,
             for( int i = 0; i < BLOCKSIZE; i += 256 )
             {
                 // sparseCols[ col + i ] is the index into the vector; indices can jump around
-                partialSums[ localID + i ] = sparseVals[ col + i ] * denseB[ sparseCols[ col + i ] * ldB ];
+                // ========== MODIFIED: use x_ld for B access ==========
+                partialSums[ localID + i ] = sparseVals[ col + i ] * denseB[ sparseCols[ col + i ] * x_ld ];
             }
         }
         else
@@ -248,7 +260,7 @@ csrmv_batched( global const FPTYPE * restrict sparseVals,
             int max_to_load = sparseRowPtrs[ stop_row ] - sparseRowPtrs[ row ];
             for(int i = 0; i < ((int)max_to_load-(int)localID); i += 256)
             {
-                partialSums[ localID + i ] = sparseVals[ col + i ] * denseB[ sparseCols[ col + i ] * ldB ];
+                partialSums[ localID + i ] = sparseVals[ col + i ] * denseB[ sparseCols[ col + i ] * x_ld ];
             }
         }
         barrier( CLK_LOCAL_MEM_FENCE );
@@ -305,10 +317,11 @@ csrmv_batched( global const FPTYPE * restrict sparseVals,
                 // All of our write-outs check to see if the output vector should first be zeroed.
                 // If so, just do a write rather than a read-write. Measured to be a slight (~5%)
                 // performance improvement.
+                // ========== MODIFIED: use y_ld for C access ==========
                 if( beta != 0. )
-                    denseC[ local_row * ldC ] = ( beta * denseC[ local_row * ldC ] ) + ( alpha * temp );
+                    denseC[ local_row * y_ld ] = ( beta * denseC[ local_row * y_ld ] ) + ( alpha * temp );
                 else
-                    denseC[ local_row * ldC ] = ( alpha * temp );
+                    denseC[ local_row * y_ld ] = ( alpha * temp );
             }
         }
         else
@@ -330,10 +343,11 @@ csrmv_batched( global const FPTYPE * restrict sparseVals,
 
                 // After you've done the reduction into the temp register,
                 // put that into the output for each row.
+                // ========== MODIFIED: use y_ld for C access ==========
                 if( beta != 0. )
-                    denseC[ local_row * ldC ] = ( beta * denseC[ local_row  * ldC ] ) + ( alpha * temp );
+                    denseC[ local_row * y_ld ] = ( beta * denseC[ local_row * y_ld ] ) + ( alpha * temp );
                 else
-                    denseC[ local_row * ldC ] = ( alpha * temp );
+                    denseC[ local_row * y_ld ] = ( alpha * temp );
                 local_row += get_local_size( 0 );
             }
         }
@@ -363,18 +377,19 @@ R"(
         if( groupID == first_wg_in_row && localID == 0 )
         {
             // The first workgroup handles the output initialization.
+            // ========== MODIFIED: use y_ld for C access ==========
             if( beta != 0. )
-                denseC[ row * ldC ] *= beta;
+                denseC[ row * y_ld ] *= beta;
             else
-                denseC[ row * ldC ] = 0.;
+                denseC[ row * y_ld ] = 0.;
             // We currently have, at most, two rows in a CSR-Vector calculation.
             // If we have two, we need to initialize the second output as well.
             if( num_rows == 2 )
             {
                 if( beta != 0. )
-                    denseC[ (row * ldC) + 1 ] *= beta;
+                    denseC[ (row * y_ld) + 1 ] *= beta;
                 else
-                    denseC[ (row * ldC) + 1 ] = 0.;
+                    denseC[ (row * y_ld) + 1 ] = 0.;
             }
             clsparse_atomic_xor( &rowBlocks[ first_wg_in_row ], ( 1UL << WGBITS ) ); // Release other workgroups.
         }
@@ -420,7 +435,8 @@ R"(
             for( long j = vecStart + localID; j < vecEnd; j += WGSIZE )
             {
                 unsigned int col = sparseCols[ (unsigned int)j ];
-                mySum += sparseVals[ (unsigned int)j ] * denseB[ col * ldB ];
+                // ========== MODIFIED: use x_ld for B access ==========
+                mySum += sparseVals[ (unsigned int)j ] * denseB[ col * x_ld ];
             }
             partialSums[ localID ] = mySum;
             barrier( CLK_LOCAL_MEM_FENCE );
@@ -437,7 +453,8 @@ R"(
             barrier( CLK_LOCAL_MEM_FENCE );
 
             if( localID == 0 )
-                atomic_add_float( &denseC[ myRow * ldC ], ( alpha * partialSums[ 0 ] ) );
+                // ========== MODIFIED: use y_ld for C access ==========
+                atomic_add_float( &denseC[ myRow * y_ld ], ( alpha * partialSums[ 0 ] ) );
 
             // CSR-VECTOR on workgroups for two rows which are inefficient for CSR-Stream
             myRow++;
@@ -448,6 +465,7 @@ R"(
 )"
 
 R"(
+// ========== MODIFIED: csrmm_ulong 增加 majorB/majorC 参数，并修改循环 ==========
 kernel void
 csrmm_ulong( global const FPTYPE * restrict sparseVals,
         global const int * restrict sparseCols,
@@ -460,16 +478,25 @@ csrmm_ulong( global const FPTYPE * restrict sparseVals,
         const ulong num_cols_C,
         const ulong ldC,
         global FPTYPE * pAlpha,
-        global FPTYPE * pBeta )
+        global FPTYPE * pBeta,
+        const int majorB,
+        const int majorC )
 {
     __local FPTYPE partialSums[ BLOCKSIZE ];
 
-    //  The current implementation of csrmm is implemented as a batched csrmv for now
-    //  The loop iterates on the number of columns in the output matrix, and we increment
-    //  the global pointers to the dense B and C matrices a column for each iteration.
+    // 预计算步长和基址
+    const ulong x_step = (majorB == ROW_MAJOR) ? 1 : ldB;
+    const ulong y_step = (majorC == ROW_MAJOR) ? 1 : ldC;
+    global const FPTYPE* const x_base = denseB;
+    global FPTYPE* const y_base = denseC;
+
     for( ulong curr_col = 0; curr_col < num_cols_C; ++curr_col )
     {
-        csrmv_batched( sparseVals, sparseCols, sparseRowPtrs, rowBlocks, denseB + curr_col, ldB, denseC + curr_col, ldC, pAlpha, pBeta, partialSums );
+        global const FPTYPE* x_ptr = x_base + curr_col * x_step;
+        global FPTYPE* y_ptr = y_base + curr_col * y_step;
+        csrmv_batched( sparseVals, sparseCols, sparseRowPtrs, rowBlocks,
+                       x_ptr, ldB, y_ptr, ldC, pAlpha, pBeta, partialSums,
+                       majorB, majorC );
     }
 }
 )"
