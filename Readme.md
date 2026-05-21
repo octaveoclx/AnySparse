@@ -2,13 +2,19 @@
 
 A streamlined, directly compilable port of **clSPARSE** with a focus on simplicity and broad OpenCL device support.
 
-Developing support：
 
-2026.5.20:
+## Recent Updates (2026‑05‑21)
 
-0-indexing for MMGenerateCOOFromFile/clsparseSCsrMatrixfromFile.
+- 0-indexing for MMGenerateCOOFromFile/clsparseSCsrMatrixfromFile.
+- Dense B and C with different row/column major in clsparseScsrmm.
+- Double-precision support for sparse matrix multiplication thanks to undergraduate student Zhipeng Liu @ College of Computer Science and Technology, GZU as part of his graduation project under my supervision.
 
-Dense B and C with different row/column major in clsparseScsrmm.
+## Updates (2026‑05‑19)
+
+- Overhauled Makefiles to support the latest OpenCL libraries and tools.
+- Removed all legacy kernel compilation steps; kernels are now shipped as plain `.cl` files within the source tree.
+- General code cleanup and variable initialization fixes.
+
 
 ## Overview
 
@@ -39,11 +45,6 @@ The library currently provides robust support for **single-precision (float)** o
 - **Cross-Platform Ready**: Tested and verified on **Windows 11**, **Ubuntu 26.04**, and **macOS 26.5**.
 - **All Sources Included**: The repository contains all necessary source and kernel files.
 
-## Recent Updates (2026‑05‑19)
-
-- Overhauled Makefiles to support the latest OpenCL libraries and tools.
-- Removed all legacy kernel compilation steps; kernels are now shipped as plain `.cl` files within the source tree.
-- General code cleanup and variable initialization fixes.
 
 ---
 
