@@ -33,10 +33,10 @@ The library supports any OpenCL 1.2+ capable device and is designed for users wh
 
 ## Supported Precisions
 
-The library currently provides robust support for **single-precision (float)** operations. Full double-precision support is a noted part of the project's roadmap for future releases.
+The library currently provides operations for following data type.
 
 - **Single (float)**: Fully supported.
-- **Double (double)**: On the development roadmap.
+- **Double (double)**: Enabled.
 
 ## Key Improvements over Original clSPARSE
 
