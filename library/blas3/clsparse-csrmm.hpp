@@ -140,19 +140,26 @@ const clsparseControl control )
         }
     }
 
+    // [ADDED] 获取矩阵的存储顺序标志 (rowMajor=0, columnMajor=1)
+    int majorB = pDenseB.major;
+    int majorC = pDenseC.major;
+    
     cl::Kernel kernel = KernelCache::get( control->queue,
                                           "csrmm_general",
                                           "csrmv_batched",
                                           params );
     KernelWrap kWrapper( kernel );
 
+    // [MODIFIED] 参数列表末尾添加 majorB 和 majorC
     kWrapper << pSparseCsrA.num_rows
         << pAlpha.value << pAlpha.offset( )
         << pSparseCsrA.row_pointer << pSparseCsrA.col_indices << pSparseCsrA.values
         << pDenseB.values << pDenseB.lead_dim << pDenseB.offset( )
         << pBeta.value << pBeta.offset( )
-        << pDenseC.values << pDenseC.num_rows << pDenseC.num_cols << pDenseC.lead_dim << pDenseC.offset( );
-
+        << pDenseC.values << pDenseC.num_rows << pDenseC.num_cols << pDenseC.lead_dim << pDenseC.offset( )
+        << majorB   // [ADDED]
+        << majorC;  // [ADDED]
+    
     // subwave takes care of each row in matrix;
     // predicted number of subwaves to be executed;
     clsparseIdx_t predicted = subwave_size * pSparseCsrA.num_rows;

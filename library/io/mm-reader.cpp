@@ -82,6 +82,12 @@ class MatrixMarketReader
     int isDoubleMem;
     Coordinate<FloatType> *unsym_coords;
 
+    // ========== MODIFICATION START ==========
+    // 新增成员变量：记录读取过程中发现的最小行列索引（原始值，未减1）
+    clsparseIdx_t min_row_found;
+    clsparseIdx_t min_col_found;
+    // ========== MODIFICATION END ==========
+
 public:
     MatrixMarketReader( ): nNZ( 0 ), nRows( 0 ), nCols( 0 ), isSymmetric( 0 ), isDoubleMem( 0 )
     {
@@ -89,6 +95,11 @@ public:
             c = '\0';
 
         unsym_coords = NULL;
+
+        // ========== MODIFICATION START ==========
+        min_row_found = UINT_MAX;
+        min_col_found = UINT_MAX;
+        // ========== MODIFICATION END ==========
     }
 
     bool MMReadHeader( FILE* infile );
@@ -117,12 +128,12 @@ public:
     {
         return isSymmetric;
     }
-/*
+
     char* GetTypecode( )
     {
         return Typecode;
     }
-*/
+
     Coordinate<FloatType> *GetUnsymCoordinates( )
     {
         return unsym_coords;
@@ -221,21 +232,45 @@ bool MatrixMarketReader<FloatType>::MMReadFormat( const std::string &filename, c
     MMGenerateCOOFromFile( mm_file, read_explicit_zeroes );
     ::fclose( mm_file );
 
+    // ========== MODIFICATION START ==========
+    // 根据记录的最小行列索引决定是否需要将坐标减1（转换为0-based）
+    // 如果最小索引是1，则文件是1-based，需要减1；如果最小索引是0，则已经是0-based，保持不变。
+    bool is_one_based = (min_row_found == 1 && min_col_found == 1);
+    if (is_one_based)
+    {
+        for (clsparseIdx_t i = 0; i < nNZ; ++i)
+        {
+            unsym_coords[i].x--;
+            unsym_coords[i].y--;
+        }
+    }
+    // 注：如果文件是混合索引（例如行1-based而列0-based），此简单逻辑会失败，但合法Matrix Market文件不会出现这种情况。
+    // ========== MODIFICATION END ==========
+
     return 0;
 }
 
+// ========== MODIFICATION START ==========
+// 修改 FillCoordData 函数：不再减1，而是存储原始值，并更新最小行列索引
+// ========== MODIFICATION END ==========
 template<typename FloatType>
 void FillCoordData( char Typecode[ ],
                     Coordinate<FloatType> *unsym_coords,
                     clsparseIdx_t &unsym_actual_nnz,
                     clsparseIdx_t ir,
                     clsparseIdx_t ic,
-                    FloatType val )
+                    FloatType val,
+                    clsparseIdx_t& min_row,      // 新增参数
+                    clsparseIdx_t& min_col )     // 新增参数
 {
+    // 更新最小索引（原始值）
+    if (ir < min_row) min_row = ir;
+    if (ic < min_col) min_col = ic;
+
     if( mm_is_symmetric( Typecode ) )
     {
-        unsym_coords[ unsym_actual_nnz ].x = ir - 1;
-        unsym_coords[ unsym_actual_nnz ].y = ic - 1;
+        unsym_coords[ unsym_actual_nnz ].x = ir;   // 不执行 -1
+        unsym_coords[ unsym_actual_nnz ].y = ic;
         unsym_coords[ unsym_actual_nnz++ ].val = val;
 
         if( unsym_coords[ unsym_actual_nnz - 1 ].x != unsym_coords[ unsym_actual_nnz - 1 ].y )
@@ -244,12 +279,13 @@ void FillCoordData( char Typecode[ ],
             unsym_coords[ unsym_actual_nnz ].y = unsym_coords[ unsym_actual_nnz - 1 ].x;
             unsym_coords[ unsym_actual_nnz ].val = unsym_coords[ unsym_actual_nnz - 1 ].val;
             unsym_actual_nnz++;
+            // 对称副本的行列值与原始相等，无需更新 min（已包含）
         }
     }
     else
     {
-        unsym_coords[ unsym_actual_nnz ].x = ir - 1;
-        unsym_coords[ unsym_actual_nnz ].y = ic - 1;
+        unsym_coords[ unsym_actual_nnz ].x = ir;
+        unsym_coords[ unsym_actual_nnz ].y = ic;
         unsym_coords[ unsym_actual_nnz++ ].val = val;
     }
 }
@@ -265,6 +301,12 @@ void MatrixMarketReader<FloatType>::MMGenerateCOOFromFile( FILE *infile, cl_bool
 
     //silence warnings from fscanf (-Wunused-result)
     clsparseIdx_t rv = 0;
+
+    // ========== MODIFICATION START ==========
+    // 重置最小索引记录（因为可能多次调用，但当前每个 MatrixMarketReader 实例只调用一次）
+    min_row_found = UINT_MAX;
+    min_col_found = UINT_MAX;
+    // ========== MODIFICATION END ==========
 
     for ( clsparseIdx_t i = 0; i < nNZ; i++)
     {
@@ -282,7 +324,10 @@ void MatrixMarketReader<FloatType>::MMGenerateCOOFromFile( FILE *infile, cl_bool
             if( exp_zeroes == 0 && val == 0 )
                 continue;
             else
-                FillCoordData( Typecode, unsym_coords, unsym_actual_nnz, ir, ic, val );
+                // ========== MODIFICATION START ==========
+                // 传递 min_row_found, min_col_found 的引用
+                FillCoordData( Typecode, unsym_coords, unsym_actual_nnz, ir, ic, val, min_row_found, min_col_found );
+                // ========== MODIFICATION END ==========
         }
         else if( mm_is_integer( Typecode ) )
         {
@@ -297,8 +342,7 @@ void MatrixMarketReader<FloatType>::MMGenerateCOOFromFile( FILE *infile, cl_bool
             if( exp_zeroes == 0 && val == 0 )
                 continue;
             else
-                FillCoordData( Typecode, unsym_coords, unsym_actual_nnz, ir, ic, val );
-
+                FillCoordData( Typecode, unsym_coords, unsym_actual_nnz, ir, ic, val, min_row_found, min_col_found );
         }
         else if( mm_is_pattern( Typecode ) )
         {
@@ -310,7 +354,7 @@ void MatrixMarketReader<FloatType>::MMGenerateCOOFromFile( FILE *infile, cl_bool
             if( exp_zeroes == 0 && val == 0 )
                 continue;
             else
-                FillCoordData( Typecode, unsym_coords, unsym_actual_nnz, ir, ic, val );
+                FillCoordData( Typecode, unsym_coords, unsym_actual_nnz, ir, ic, val, min_row_found, min_col_found );
         }
     }
     nNZ = unsym_actual_nnz;
@@ -889,4 +933,4 @@ clsparseDCsrMatrixfromFile( clsparseCsrMatrix* csrMatx, const char* filePath, cl
 //    return clsparseSuccess;
 //}
 
-#pragma warning( pop ) 
+#pragma warning( pop )
