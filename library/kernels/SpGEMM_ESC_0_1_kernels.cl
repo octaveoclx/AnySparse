@@ -42,8 +42,11 @@ R"(
 #endif
 
 #define TUPLE_QUEUE 6
-// typedef double vT;
-#define vT float
+// vT is selected by host compile option: -DVALUE_TYPE=float or -DVALUE_TYPE=double
+#ifndef VALUE_TYPE
+#define VALUE_TYPE float
+#endif
+#define vT VALUE_TYPE
 
 __kernel
 void ESC_0(__global const int   *d_queue,

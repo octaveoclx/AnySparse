@@ -1309,6 +1309,22 @@ extern "C" {
                           const clsparseCsrMatrix* sparseMatB,
                                 clsparseCsrMatrix* sparseMatC,
                           const clsparseControl control );
+
+    /*!
+     * \brief Double Precision CSR Sparse Matrix times Sparse Matrix
+     * \details \f$ C \leftarrow A \ast B \f$
+     * \param[in] sparseMatA Input CSR sparse matrix. Values must be cl_double; indices are clsparseIdx_t.
+     * \param[in] sparseMatB Input CSR sparse matrix. Values must be cl_double; indices are clsparseIdx_t.
+     * \param[out] sparseMatC Output CSR sparse matrix. Values are cl_double; indices are clsparseIdx_t.
+     * \param[in] control A valid clsparseControl created with clsparseCreateControl
+     * \pre The input sparse matrices data must first be sorted by rows, then by columns
+     * \ingroup BLAS-3
+     */
+   CLSPARSE_EXPORT clsparseStatus
+      clsparseDcsrSpGemm( const clsparseCsrMatrix* sparseMatA,
+                          const clsparseCsrMatrix* sparseMatB,
+                                clsparseCsrMatrix* sparseMatC,
+                          const clsparseControl control );
     /**@}*/
 
     /*!
