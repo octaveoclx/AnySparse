@@ -55,6 +55,9 @@ R"(
 #endif
 )"
 
+#define ROW_MAJOR 0
+#define COL_MAJOR 1
+
 R"(
 void
 csrmv( const INDEX_TYPE num_rows,
