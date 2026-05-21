@@ -23,63 +23,63 @@
 #include "../internal/kernel-cache.hpp"
 #include "../internal/kernel-wrap.hpp"
 
-//template <typename T>
-//clsparseStatus
-//csrmm_adaptive( const clsparseScalarPrivate& pAlpha,
-//const clsparseCsrMatrixPrivate& pSparseCsrA,
-//const cldenseMatrixPrivate& pDenseB,
-//const clsparseScalarPrivate& pBeta,
-//cldenseMatrixPrivate& pDenseC,
-//const clsparseControl control )
-//{
-//  if( typeid( T ) == typeid( cl_double ) )
-//  {
-//      return clsparseNotImplemented;
-//  }
-//
-//  if( ( pDenseB.major != rowMajor ) && ( pDenseC.major != rowMajor ) )
-//  {
-//      return clsparseNotImplemented;
-//  }
-//
-//  const cl_uint group_size = 256;
-//
-//  const std::string params = std::string( )
-//  + " -DROWBITS=" + std::to_string( ROW_BITS )
-//  + " -DWGBITS=" + std::to_string( WG_BITS )
-//  + " -DBLOCKSIZE=" + std::to_string( BLKSIZE );
-//#ifdef DOUBLE
-//  buildFlags += " -DDOUBLE";
-//#endif
-//
-//  cl::Kernel kernel = KernelCache::get( control->queue,
-//                                        "csrmm",
-//                                        "csrmm_ulong",
-//                                        params );
-//
-//  KernelWrap kWrapper( kernel );
-//
-//  kWrapper << pSparseCsrA.values << pSparseCsrA.col_indices << pSparseCsrA.row_pointer << pSparseCsrA.rowBlocks
-//      << pDenseB.values << pDenseB.lead_dim
-//      << pDenseC.values << pDenseC.num_rows << pDenseC.num_cols << pDenseC.lead_dim
-//      << pAlpha.value << pBeta.value;
-//
-//  // if NVIDIA is used it does not allow to run the group size
-//  // which is not a multiplication of group_size. Don't know if that
-//  // have an impact on performance
-//  cl_uint global_work_size = ( pSparseCsrA.rowBlockSize - 1 ) * group_size;
-//  cl::NDRange local( group_size );
-//  cl::NDRange global( global_work_size > local[ 0 ] ? global_work_size : local[ 0 ] );
-//
-//  cl_int status = kWrapper.run( control, global, local );
-//
-//  if( status != CL_SUCCESS )
-//  {
-//      return clsparseInvalidKernelExecution;
-//  }
-//
-//  return clsparseSuccess;
-//}
+#if 0
+template<typename T>
+clsparseStatus
+csrmm_adaptive( const clsparseScalarPrivate& pAlpha,
+                const clsparseCsrMatrixPrivate& pSparseCsrA,
+                const cldenseMatrixPrivate& pDenseB,
+                const clsparseScalarPrivate& pBeta,
+                cldenseMatrixPrivate& pDenseC,
+                const clsparseControl control )
+{
+    // 可以移除或者保留对双精度的限制，因为 adaptive 内核已支持
+    // if( typeid( T ) == typeid( cl_double ) ) return clsparseNotImplemented;
+
+    // 不再限制列主序，因为已经支持
+    // if( ( pDenseB.major != rowMajor ) && ( pDenseC.major != rowMajor ) )
+    //     return clsparseNotImplemented;
+
+    const cl_uint group_size = 256;
+
+    std::string params = std::string( )
+        + " -DROWBITS=" + std::to_string( ROW_BITS )
+        + " -DWGBITS=" + std::to_string( WG_BITS )
+        + " -DBLOCKSIZE=" + std::to_string( BLKSIZE );
+    if( typeid( T ) == typeid( cl_double ) )
+    {
+        params += " -DDOUBLE";
+        if (!control->dpfp_support)
+            return clsparseInvalidDevice;
+    }
+
+    // 获取存储顺序
+    int majorB = pDenseB.major;
+    int majorC = pDenseC.major;
+
+    cl::Kernel kernel = KernelCache::get( control->queue,
+                                          "csrmm_adaptive",   // 注意内核程序名
+                                          "csrmm_ulong",      // 内核名
+                                          params );
+    KernelWrap kWrapper( kernel );
+
+    kWrapper << pSparseCsrA.values << pSparseCsrA.col_indices << pSparseCsrA.row_pointer << pSparseCsrA.rowBlocks
+        << pDenseB.values << pDenseB.lead_dim
+        << pDenseC.values << pDenseC.num_rows << pDenseC.num_cols << pDenseC.lead_dim
+        << pAlpha.value << pBeta.value
+        << majorB << majorC;   // 添加两个参数
+
+    cl_uint global_work_size = ( pSparseCsrA.rowBlockSize - 1 ) * group_size;
+    cl::NDRange local( group_size );
+    cl::NDRange global( global_work_size > local[ 0 ] ? global_work_size : local[ 0 ] );
+
+    cl_int status = kWrapper.run( control, global, local );
+    if( status != CL_SUCCESS )
+        return clsparseInvalidKernelExecution;
+
+    return clsparseSuccess;
+}
+#endif
 
 template<typename T>
 clsparseStatus
