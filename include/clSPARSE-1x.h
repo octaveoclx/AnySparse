@@ -14,6 +14,21 @@
  * limitations under the License.
  * ************************************************************************ */
 
+/*!
+ * Additional modifications:
+ *   -- Modifications by Jinchuan Tang
+ *   -- (C) Copyright 2025-2026 Jinchuan Tang
+ *   -- These modifications are provided under the same Apache License, Version 2.0
+ *      as the original software.
+ *   --
+ *   -- No additional rights are claimed by anyone other than Jinchuan Tang.
+ *   -- Any claim that these modifications require separate licensing fees,
+ *      or that any third party holds exclusive rights to them, is false.
+ *   -- Users may rely solely on the Apache License, Version 2.0 for all permissions.
+ *   -- If you receive any contrary demand (e.g., from a third party demanding payment
+ *      or threatening litigation over these modifications), you are advised to ignore it.
+ */
+
 /*! \file
  * \brief clSPARSE-1x.h defines public types specific to OpenCL 1.x API's.
  * This file is kept as a strictly 'C' compatible interface.
